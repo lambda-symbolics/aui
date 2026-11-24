@@ -416,14 +416,12 @@ Context counts estimated by Autolith start with a tilde."
 
 (-> approval-paint (workbench stage &key (:x integer) (:y integer) (:width integer) (:height integer)) null)
 (defun approval-paint (workbench stage &key x y width height)
-  "Draw the approval card. The title bar contains the title of the request, and the request follows in the typewriter face. The choices follow as a numbered list, with a description beside each choice.
-
-The card is drawn inverted, as paper on ink, so that it stands apart from the
-conversation."
+  "Draw the request and its numbered choices on a paper approval card."
   (let* ((approval (workbench-approval workbench))
          (options  (getf approval :options))
          (box-h    (- height *shadow-offset* 10))
-         (bar      28)
+         (bar      (paint-window-frame x y :width width :height box-h
+                                       :title (format nil "Approve: ~A" (or (getf approval :title) "request"))))
          (entry    (make-paragraph (list (make-span (or (getf approval :entry) "") nil))
                                    :style (text-style ':code) :wrap ':anywhere))
          (rows-y   (- (+ y box-h) 8 (* *approval-row-height* (length options))))
@@ -434,24 +432,15 @@ conversation."
          ;; descriptions are also the tooltips of the choices.
          (detail-p (> (- (+ x width) detail-x 14) 220)))
     (paragraph-layout entry (- width 44))
-    (paint-dither (+ x *shadow-offset*) (+ y box-h) :width width :height *shadow-offset*)
-    (paint-dither (+ x width) (+ y *shadow-offset*) :width *shadow-offset* :height (- box-h *shadow-offset*))
     (stage-region stage ':approval-card :x x :y y :width width :height box-h :cursor ':default)
-    (with-inversion (x y width box-h)
-      (with-inversion ((+ x 3) (+ y 3) (- width 6) (- bar 3))
-        (paint-text-in (format nil "Approve: ~A" (or (getf approval :title) "request")) (text-style ':label-bold)
-                       :x      (+ x 10)
-                       :y      (+ y 3)
-                       :width  (- width 20)
-                       :height (- bar 3)))
-      (with-clip ((+ x 14) (+ y bar 12) (- width 28) (max 0 (- rows-y y bar 20)))
-        (paragraph-paint entry (+ x 22) (+ y bar 12)))
-      (approval--paint-choices workbench stage options
-                               :x        x
-                               :y        rows-y
-                               :width    width
-                               :label-w  label-w
-                               :detail-x (and detail-p detail-x))))
+    (with-clip ((+ x 14) (+ y bar 12) (- width 28) (max 0 (- rows-y y bar 20)))
+      (paragraph-paint entry (+ x 22) (+ y bar 12)))
+    (approval--paint-choices workbench stage options
+                             :x        x
+                             :y        rows-y
+                             :width    width
+                             :label-w  label-w
+                             :detail-x (and detail-p detail-x)))
   nil)
 
 (-> approval--paint-choices
