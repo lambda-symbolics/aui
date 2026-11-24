@@ -405,6 +405,52 @@ ARGUMENTS is an association list of names and decoded values."
            :label         "arguments"
            :margin-bottom 8))))
 
+(-> entries--edit-operation (list) string)
+(defun entries--edit-operation (operation)
+  "Describe the requested change without revision tokens or line anchors."
+  (flet ((field (key) (rest (assoc key operation :test #'equal))))
+    (let* ((op (field "op")) (start (field "start-line")) (end (field "end-line"))
+           (action (substitute #\Space #\- (or (portable-string op) "edit"))))
+      (with-output-to-string (out)
+        (cond ((and (integerp start) (integerp end))
+               (format out "~A ~D~:[~;–~D~]" action start (/= start end) end))
+              ((integerp (field "line"))
+               (format out "~A line ~D" action (field "line")))
+              (t
+               (write-string action out)))
+        (dolist (pair operation)
+          (unless (member (first pair) '("op" "line" "anchor" "start-line" "end-line" "start-anchor" "end-anchor") :test #'equal)
+            (format out "~%~A~A" (if (equal (first pair) "content") "" (format nil "~A: " (first pair)))
+                    (entries--value-text (rest pair)))))))))
+
+(-> entries--resource-edit-blocks (tool-entry boolean) list)
+(defun entries--resource-edit-blocks (entry expanded-p)
+  "Draw a compact patch inline and the full change when the file row is opened."
+  (let* ((patch      (tool-entry-patch entry))
+         (output     (tool-entry-output entry))
+         (details    (getf (tool-entry-details entry) :resource-edit))
+         (operations (entries--argument entry "operations")))
+    (cond ((and (eq (tool-entry-status entry) ':completed) (stringp patch))
+           (let ((text (if expanded-p patch (entries--preview patch :lines *diff-preview-lines*))))
+             (append (list (make-code-block text :spans (patch-spans text) :margin-bottom 8))
+                     (when (and expanded-p output (getf details :delimiter-warning-p))
+                       (entries--result-blocks entry output)))))
+          ((not expanded-p)
+           nil)
+          ((and (eq (tool-entry-status entry) ':failed) output)
+           (entries--result-blocks entry output))
+          (t
+           (append (loop for operation in (and (listp operations) operations)
+                         when (and (consp operation) (every #'consp operation))
+                           collect (make-code-block (entries--edit-operation operation)
+                                                    :label (if (and (eq (tool-entry-status entry) ':completed)
+                                                                    (member (rest (assoc "op" operation :test #'equal))
+                                                                            '("replace-lines" "delete-lines") :test #'equal))
+                                                               "Original lines unavailable"
+                                                               "Requested edit")))
+                   (when (and output (or (getf details :delimiter-warning-p) (null operations)))
+                     (entries--result-blocks entry output)))))))
+
 (-> entries--tool-detail (tool-entry) flow-block)
 (defun entries--tool-detail (entry)
   "Return the opened detail of the tool call ENTRY.
@@ -508,9 +554,12 @@ The arguments and the result are shown in the opened row. A plan update is drawn
                           :trailing   (and seconds (entries--duration seconds))
                           :style      (text-style ':label)
                           :action     toggle)))
-        (if expanded-p
-            (list row (entries--tool-detail entry))
-            (list row)))))
+          (cond ((equal (tool-entry-name entry) "resource.edit")
+                 (cons row (entries--resource-edit-blocks entry expanded-p)))
+                (expanded-p
+                 (list row (entries--tool-detail entry)))
+                (t
+                 (list row))))))
 
 
 ;;;; -- Notices, Output and Markers --
