@@ -150,6 +150,8 @@
      (:file "session-tests")
      (:file "document-tests")
      (:file "links-tests")
+     (:file "composer-tests")
+     (:file "completion-tests")
      (:file "launch-tests"))))
   :perform     (asdf:test-op (operation component)
                  (declare (ignore operation component))

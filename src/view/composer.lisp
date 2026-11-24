@@ -246,6 +246,82 @@ missing, for example, if a provider cannot be reached."
         (composer--octets (composer-text workbench) index))
   nil)
 
+(-> composer--selected-p (workbench) boolean)
+(defun composer--selected-p (workbench)
+  "Return T when the composer has a selection, which a typed character replaces."
+  (let ((editor (workbench-editor workbench)))
+    (and editor (plusp (length (lightfast:text-selection editor))))))
+
+(-> composer--closing-brace (character) (or null character))
+(defun composer--closing-brace (character)
+  "Return the brace that closes CHARACTER, or NIL when CHARACTER opens none."
+  (case character
+    (#\( #\))
+    (#\[ #\])
+    (#\{ #\})))
+
+(-> composer--escaped-p (string integer) boolean)
+(defun composer--escaped-p (text index)
+  "Return T when an odd run of backslashes precedes INDEX in TEXT."
+  (oddp (loop for position downfrom (1- index) to 0
+              while (char= (char text position) #\\)
+              count t)))
+
+(-> composer--brace-step (string integer character &key (:selected-p boolean)) (or null keyword))
+(defun composer--brace-step (text caret character &key selected-p)
+  "Return the step for typing CHARACTER, a brace, with the caret at CARET in TEXT.
+
+:PAIR inserts the pair and leaves the caret between the braces. :STEP moves the
+caret over the brace that is already at CARET, so that a close brace typed after
+its pair does not double it. A backslash before the caret, or a selection that
+the editor replaces, takes no step."
+  (unless selected-p
+    (let ((closing (composer--closing-brace character)))
+      (cond
+        ((composer--escaped-p text caret)
+         nil)
+        (closing
+         :pair)
+        ((and (< caret (length text))
+              (char= character (char text caret)))
+         :step)))))
+
+(-> composer--brace-pair-around-p (string integer) boolean)
+(defun composer--brace-pair-around-p (text caret)
+  "Return T when CARET in TEXT sits between an empty pair of braces."
+  (and (plusp caret)
+       (< caret (length text))
+       (let ((closing (composer--closing-brace (char text (1- caret)))))
+         (and closing
+              (char= closing (char text caret))
+              (not (composer--escaped-p text (1- caret)))))))
+
+(-> composer--insert (workbench integer string) null)
+(defun composer--insert (workbench index text)
+  "Insert TEXT at INDEX in the composer and put the caret after it."
+  (let ((editor (workbench-editor workbench))
+        (source (composer-text workbench)))
+      (when editor
+        ;; Typing leaves the history recall, as it does in the line editor of the terminal.
+        (setf (workbench-history-index workbench) nil)
+        (lightfast:text-replace editor
+                                (composer--octets source index)
+                                (composer--octets source index)
+                                text)
+        (setf (lightfast:text-insert-position editor)
+              (composer--octets (composer-text workbench) (+ index (length text))))
+        (workbench-redraw workbench)))
+  nil)
+
+(-> composer--pair-braces (workbench integer character) null)
+(defun composer--pair-braces (workbench caret character)
+  "Insert CHARACTER and the brace that closes it at CARET and leave the caret between them."
+  (let ((closing (composer--closing-brace character)))
+    (when (and closing (workbench-editor workbench))
+      (composer--insert workbench caret (coerce (list character closing) 'string))
+      (composer--move workbench (1+ caret))))
+  nil)
+
 (-> composer--word-start (string integer) integer)
 (defun composer--word-start (text index)
   "Return the start of the word before INDEX in TEXT. Whitespace before INDEX is skipped."
@@ -270,18 +346,52 @@ missing, for example, if a provider cannot be reached."
 (defun composer-edit-key (workbench event)
   "Handle the key EVENT in the composer as the line editor of Autolith does. Return T if the key was used.
 
-Ctrl-K is only used if there is text after the caret on the line. At the end
-of a line, Ctrl-K is left unused, so that it can open the list of commands."
-  (let* ((key       (key-event-key event))
-         (control-p (key-event-control-p event))
-         (alt-p     (key-event-alt-p event))
-         (text      (composer-text workbench))
-         (caret     (and (or control-p alt-p) (workbench-editor workbench) (composer--caret workbench)))
-         (line      (and caret (1+ (or (position #\Newline text :end caret :from-end t) -1))))
-         (line-end  (and caret (or (position #\Newline text :start caret) (length text)))))
+A typed brace pairs with its close brace or steps over a brace that is already
+under the caret, and backspace removes an empty pair, as the line editor of the
+terminal does. A selection is replaced by the editor, and a key that types
+several characters is inserted as typed, so neither pairs. Ctrl-K is only used
+if there is text after the caret on the line. At the end of a line, Ctrl-K is
+left unused, so that it can open the list of commands."
+    (let* ((key         (key-event-key event))
+           (character   (or (key-event-character event) key))
+           (control-p   (key-event-control-p event))
+           (alt-p       (key-event-alt-p event))
+           (command-p   (key-event-command-p event))
+           (brace-p     (and (characterp character)
+                             (member character '(#\( #\) #\[ #\] #\{ #\}) :test #'char=)
+                             (not control-p)
+                             (not alt-p)
+                             (not command-p)))
+         (backspace-p (and (eq key ':backspace)
+                           (not control-p)
+                           (not alt-p)
+                           (not command-p)))
+         (text        (composer-text workbench))
+         (caret       (and (or control-p alt-p brace-p backspace-p)
+                           (workbench-editor workbench)
+                           (composer--caret workbench)))
+           (line        (and caret (1+ (or (position #\Newline text :end caret :from-end t) -1))))
+           (line-end    (and caret (or (position #\Newline text :start caret) (length text))))
+           (selected-p  (and caret (or brace-p backspace-p) (composer--selected-p workbench)))
+           (step        (and brace-p
+                             caret
+                             (composer--brace-step text caret character :selected-p selected-p)))
+         (pair-p      (and backspace-p
+                           caret
+                           (not selected-p)
+                           (composer--brace-pair-around-p text caret))))
     (cond
       ((null caret)
        nil)
+      ((eq step :pair)
+         (composer--pair-braces workbench caret character)
+       t)
+      ((eq step :step)
+       (composer--move workbench (1+ caret))
+       t)
+      (pair-p
+       (composer--delete workbench (1- caret) (1+ caret))
+       t)
       ((or (and control-p (member key '(:backspace #\w)))
            (and alt-p (eq key ':backspace)))
        (composer--delete workbench (composer--word-start text caret) caret)

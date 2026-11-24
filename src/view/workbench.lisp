@@ -173,8 +173,8 @@
    (completion-dismissed
     :initform      nil
     :accessor      workbench-completion-dismissed
-    :type          (or null string)
-    :documentation "The draft for which the person closed the list of completions, or NIL.")
+    :type          (or null cons)
+    :documentation "The draft and caret for which the person closed the list of completions, or NIL.")
    (history
     :initform      nil
     :accessor      workbench-history
