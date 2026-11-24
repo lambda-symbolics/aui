@@ -343,6 +343,7 @@ Return T if the names were added."
   (setf (tool-entry-status entry)  (if success-p ':completed ':failed)
         (tool-entry-output entry)  (and output (princ-to-string output))
         (tool-entry-details entry) details
+        (tool-entry-patch entry)   nil
         (tool-entry-seconds entry) seconds)
   nil)
 
@@ -365,6 +366,9 @@ Return T if the names were added."
          (entry      (and call-identifier (transcript-find-tool transcript call-identifier))))
     (when entry
       (apply #'tool-entry-settle entry result)
+      (when (equal (tool-entry-name entry) "resource.edit")
+        (let ((entries (transcript-entries transcript)))
+          (edit-history--reconstruct entry entries (position entry entries :from-end t))))
       (transcript-touch transcript entry)))
   nil)
 
@@ -443,7 +447,15 @@ the previous call are stored in the call entries of this page."
                   (setf (gethash (tool-entry-call-identifier entry) calls) entry))
                 (push entry entries)))))
       (mapc #'settle (shiftf (projector--unsettled projector) unsettled)))
-    (nreverse entries)))
+    (let* ((page        (nreverse entries))
+           (page-length (length page))
+           (transcript  (projector-transcript projector))
+           (later       (transcript-entries transcript))
+           (window      (concatenate (quote vector) page (subseq later 0 (min 128 (length later))))))
+      (loop for entry across window for index from 0
+            when (edit-history--reconstruct entry window index)
+              do (when (>= index page-length) (transcript-touch transcript entry)))
+      page)))
 
 
 ;;;; -- Live Events --

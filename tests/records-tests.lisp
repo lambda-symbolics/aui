@@ -179,7 +179,7 @@ The sequence number of the record is SEQUENCE, and the wire JSON is WIRE-JSON."
         (fiveam:is (eq arguments-p found-arguments-p) "~S has the arguments flag ~S" text found-arguments-p)))))
 
 (fiveam:test a-stopped-turn-is-not-a-failure
-  (let* ((projector (make-instance 'projector))
+  (let* ((projector (make-projector (make-transcript)))
          (entries   (records->entries
                      projector
                      (list '(:turn-aborted :seq 1 :reason :cancelled
@@ -396,3 +396,30 @@ The sequence number of the record is SEQUENCE, and the wire JSON is WIRE-JSON."
      (projector-apply projector (list :record :record (list :summary :seq 9 :time 4000000003 :through-seq 6
                                                                      :content "summary")))
      (fiveam:is (equal '(marker-entry) (map 'list #'type-of (transcript-entries transcript))))))
+
+(fiveam:test edit-history-reconstructs-an-anchored-multiple-edit
+  (let* ((uri     "workspace:sample")
+         (header  (format nil "URI: ~A~%Revision: R1~%Visible lines: 4-6 of 20~%Elided: none~%Content:~%" uri))
+         (body    (format nil "~6D:~A  old~%~6D:~A  ~%~6D:~A    next" 4 (cl-hashline:line-anchor "old")
+                          5 (cl-hashline:line-anchor "") 6 (cl-hashline:line-anchor "  next")))
+         (read    (make-instance 'tool-entry :name "resource.read" :status ':completed :output (concatenate 'string header body)))
+         (edit    (make-instance 'tool-entry :name "resource.edit" :status ':completed
+                                 :output    (format nil "Applied replace-lines 4-5; delete-lines 6-6.~%URI: ~A~%Revision: R2~%" uri)
+                                 :arguments `(("base-revision" . "R1")
+                                              ("operations" (("op" . "delete-lines") ("start-line" . 6) ("end-line" . 6))
+                                                            (("op" . "replace-lines") ("start-line" . 3)
+                                                             ("start-anchor" . ,(cl-hashline:line-anchor "old"))
+                                                             ("end-line" . 5) ("content" . "new"))))))
+         (entries (vector read edit)))
+    (fiveam:is (equal (format nil "--- ~A~%+++ ~A~%@@ -4,2 +4,1 @@~%-old~%-~%+new~%@@ -6,1 +4,0 @@~%-  next~%" uri uri)
+                      (edit-history--reconstruct edit entries 1)))
+    (setf (tool-entry-patch edit) nil)
+    (flet ((unavailable () (null (edit-history--reconstruct edit entries 1))))
+      (setf (tool-entry-status edit) ':failed)
+      (fiveam:is (unavailable))
+      (setf (tool-entry-status edit) ':completed (tool-entry-output read) (concatenate 'string header (subseq body 0 5)))
+      (fiveam:is (unavailable))
+      (setf (tool-entry-output read) (concatenate 'string (substitute #\2 #\1 header) body))
+      (fiveam:is (unavailable))
+      (setf (tool-entry-output read) (concatenate 'string (substitute #\z #\w header) body))
+      (fiveam:is (unavailable)))))

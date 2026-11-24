@@ -126,6 +126,12 @@ The result of the call contains the same identifier.")
     :accessor      tool-entry-status
     :type          tool-status
     :documentation "The progress of the call.")
+   (patch
+    :initarg       :patch
+    :initform      nil
+    :accessor      tool-entry-patch
+    :type          (or null string)
+    :documentation "The logical-line patch reconstructed from this channel, or NIL.")
    (output
     :initarg       :output
     :initform      nil

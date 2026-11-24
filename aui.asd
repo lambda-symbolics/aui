@@ -53,6 +53,7 @@
       ((:file "portable")
        (:file "installation")
        (:file "world")
+       (:file "edit-history")
        (:file "records")
        (:file "history")
        (:file "workspace")
