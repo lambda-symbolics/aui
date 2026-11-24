@@ -669,6 +669,26 @@ not be changed by the exercise."
                                                         (and (eq (workbench-attachment workbench) ':closed)
                                                              (not (world-served-p (workbench-world workbench)))))
                                                       :seconds 90))
+               (let* ((launch (launch-parse '("open")))
+                      (world  (launch-world launch))
+                      (picker (make-instance 'workbench :launch launch :world world :queue (make-ui-queue))))
+                 (workbench--reset-channel picker)
+                 (window-build picker)
+                 (unwind-protect
+                      (progn
+                        (main--start picker)
+                        (exercise-expect "the desktop picker starts a stopped server and lists the saved channel without attaching"
+                                         (exercise-live--until picker
+                                                               (lambda ()
+                                                                 (and (eq (workbench-attachment picker) ':none)
+                                                                      (null (workbench-channel picker))
+                                                                      (find channel (sidebar-entries picker) :test #'equal
+                                                                            :key                                   (lambda (row) (getf row :id)))
+                                                                      (world-served-p world)))
+                                                               :seconds 120))
+                        (exercise-live--picture picker "live-desktop-start"))
+                   (workbench-close picker))
+                 (world-stop-server world))
                (exercise--draw workbench)
                (exercise-live--picture workbench "live-disconnected")
                (exercise-expect "the disconnect report can be copied before retrying"

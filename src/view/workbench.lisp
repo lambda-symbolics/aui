@@ -425,17 +425,20 @@ goal comes from the newest goal record seen in the history and in live events."
 (-> workbench-retry (workbench) null)
 (defun workbench-retry (workbench)
   "Reconnect a closed channel in its folder, or repeat a failed open request."
-  (if (eq (workbench-attachment workbench) ':closed)
-      (workbench-open workbench :channel (workbench-channel workbench)
-                      :directory (workbench-directory workbench) :new-p t)
-      (apply #'workbench-open workbench (workbench--open-request workbench))))
+  (cond ((and (launch-pick-p (workbench-launch workbench)) (null (workbench-session workbench)))
+         (workbench-open-picker workbench))
+        ((eq (workbench-attachment workbench) ':closed)
+         (workbench-open workbench :channel (workbench-channel workbench)
+                         :directory (workbench-directory workbench) :new-p t))
+        (t
+         (apply #'workbench-open workbench (workbench--open-request workbench)))))
 
-(-> workbench-run-aside (workbench t function) null)
-(defun workbench-run-aside (workbench request function)
+(-> workbench-run-aside (workbench t function &key (:generation (or null integer))) null)
+(defun workbench-run-aside (workbench request function &key generation)
   "Call FUNCTION on a new thread, and post the value or the error report as the result of REQUEST.
 
-The result is stamped with the generation at the time when it is posted. It is
-therefore applied even if another channel is shown by then."
+Supply GENERATION to discard the result after a switch. Otherwise apply it
+regardless of which channel is shown when the function returns."
   (bordeaux-threads:make-thread
    (lambda ()
      (multiple-value-bind (outcome value report)
@@ -444,12 +447,26 @@ therefore applied even if another channel is shown by then."
              (values ':condition nil (condition-report condition))))
        (ui-queue-push (workbench-queue workbench)
                       (make-instance 'result-event
-                                     :generation (workbench-generation workbench)
-                                     :request    request
-                                     :outcome    outcome
-                                     :value      value
-                                     :report     report))))
+                       :generation            (or generation (workbench-generation workbench))
+                                     :request request
+                                     :outcome outcome
+                                     :value   value
+                                     :report  report))))
    :name "AUI aside")
+  nil)
+
+(-> workbench-open-picker (workbench) null)
+(defun workbench-open-picker (workbench)
+  "Start the world server for the channel picker without opening a channel."
+  (let ((world (workbench-world workbench)))
+    (setf (workbench-sidebar-shown-p workbench) t
+          (workbench-drawer-open-p workbench) t
+          (workbench-attachment workbench) ':opening
+          (workbench-progress workbench) '(0 "connecting to the world server")
+          (workbench-failure workbench) nil)
+    (workbench-run-aside workbench ':open-picker (lambda () (world-start-server world))
+                         :generation (incf (workbench-generation workbench))))
+  (workbench-redraw workbench)
   nil)
 
 (defparameter *participants-seconds* 3
@@ -972,6 +989,11 @@ A reading for a channel other than the channel shown is dropped."
     (when (stringp request)
       (workbench--refreshed workbench request))
     (cond
+      ((eq request ':open-picker)
+       (setf (workbench-progress workbench) nil
+             (workbench-attachment workbench) (if ok-p ':none ':failed)
+             (workbench-failure workbench) (result-event-report event))
+       (unless ok-p (setf (workbench-drawer-open-p workbench) nil)))
       ((equal request "_autolith/state")
        (when ok-p
          (setf (workbench-state workbench) value)))

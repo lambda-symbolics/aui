@@ -385,9 +385,14 @@ the rows, and the buttons for a new channel and for deleting the shown channel."
                    (:channel
                     (sidebar--paint-channel workbench stage entry :x x :y row-y :width width)))))
       (when (null entries)
-        (paint-text-in (if (plusp (length (workbench-filter workbench)))
-                           "No matching channels."
-                           "No channels yet.") (text-style ':small :face ':serif-italic)
+        (paint-text-in (cond ((eq (workbench-attachment workbench) ':opening)
+                              "Connecting…")
+                             ((eq (workbench-attachment workbench) ':failed)
+                              "Connection failed.")
+                             ((plusp (length (workbench-filter workbench)))
+                              "No matching channels.")
+                             (t
+                              "No channels yet.")) (text-style ':small :face ':serif-italic)
                        :x      (+ x 14)
                        :y      top
                        :width  (- width 28)

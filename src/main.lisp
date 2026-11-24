@@ -34,8 +34,7 @@
       (t
        (world-start-watching (workbench-world workbench))
        (if (launch-pick-p launch)
-           (setf (workbench-sidebar-shown-p workbench) t
-                 (workbench-drawer-open-p workbench)   t)
+           (workbench-open-picker workbench)
            (workbench-open workbench :channel (launch-channel launch)))))
     (when (launch-draft launch)
       (setf (composer-text workbench) (launch-draft launch)))
