@@ -606,7 +606,13 @@ conversation."
                        :height    36
                        :primary-p t
                        :action    (lambda ()
-                                     (workbench-retry workbench)))))
+                                     (workbench-retry workbench)))
+         (when (workbench-failure workbench)
+           (paint-button stage ':copy-error "Copy error"
+                         :x      (+ left (floor (- column 160) 2))
+                         :y      (+ below 72 (paragraph-height reason))
+                         :width 160 :height 36
+                         :action (lambda () (lightfast:copy-text (workbench-failure workbench)))))))
       (:none
        (let ((below (chrome--paint-centered "Autolith" (text-style ':display) :x left :y top :width column)))
          (setf below (chrome--paint-centered "Pick a channel, or start a new one." (text-style ':body :face ':serif-italic)

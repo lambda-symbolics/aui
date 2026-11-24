@@ -670,6 +670,9 @@ not be changed by the exercise."
                                                              (not (world-served-p (workbench-world workbench)))))
                                                       :seconds 90))
                (exercise--draw workbench)
+               (exercise-live--picture workbench "live-disconnected")
+               (exercise-expect "the disconnect report can be copied before retrying"
+                                (exercise--click workbench ':copy-error))
                (exercise-expect "Try again is available after shutdown" (exercise--click workbench ':retry))
                (exercise-expect "the reopened channel is current in the sidebar after restart"
                                 (exercise-live--until
