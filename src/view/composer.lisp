@@ -10,6 +10,8 @@
 
 (defparameter *composer-toolbar-height* 34
   "The height of the row of chips and the send button.")
+(defparameter *composer-preview-height* 20
+  "The height of the row that previews the command named by the draft.")
 
 (defparameter *permission-modes*
   '((:ask         "Ask first"   "Ask me before running a command that is not recognized")
@@ -74,13 +76,101 @@ A step past the newest text empties the composer."
     (max *composer-line-height*
          (min (* *composer-maximum-lines* *composer-line-height*) height))))
 
+;;;; -- Command Preview --
+
+;;; A draft that names a command says so under the editor. The preview explains
+;;; the command and its arguments without changing what is sent: the channel
+;;; decides whether a form runs locally.
+
+(defstruct command-preview
+  "A command that the composer draft names.
+NAME is the command name, HINT its argument hint, DETAIL its one-line
+description, and NOTE a caveat about running it from the window."
+  (name   ""   :type string)
+  (hint   ""   :type string)
+  (detail ""   :type string)
+  (note    nil :type (or null string)))
+
+(-> draft-command-preview (string list) (or null command-preview))
+(defun draft-command-preview (text operations)
+  "Return the preview of the command that TEXT names among OPERATIONS, or NIL.
+
+TEXT is a composer draft. A preview exists when the draft is a Lisp form whose
+name matches a command of the channel. Prose, a tool and an unknown name have
+none."
+  (multiple-value-bind (name arguments-p) (command-text-name text)
+    (declare (ignore arguments-p))
+    (when name
+      (let ((operation (find-if (lambda (row)
+                                  (let ((row-name (portable-get row "name")))
+                                    (and (stringp row-name)
+                                         (string-equal name row-name))))
+                                operations)))
+        (when (and operation (equal (portable-get operation "kind") "command"))
+          (let ((row-name (string-downcase (portable-get operation "name"))))
+            (make-command-preview
+             :name   row-name
+             :hint   (or (portable-string (portable-get operation "argumentHint")) "")
+             :detail (or (portable-string (portable-get operation "description")) "")
+             :note   (and (member row-name *terminal-only-commands* :test #'string=)
+                          "terminal only"))))))))
+
+(-> composer-draft-preview (workbench) (or null command-preview))
+(defun composer-draft-preview (workbench)
+  "Return the preview of the command named by the draft in WORKBENCH's composer."
+    (draft-command-preview (composer-text workbench) (workbench-operations workbench)))
+
+(-> composer-preview-height (workbench) integer)
+(defun composer-preview-height (workbench)
+  "Return the height that the command preview takes from WORKBENCH's composer."
+  (if (composer-draft-preview workbench) *composer-preview-height* 0))
+
+(-> composer-paint-preview
+    (workbench &key (:x integer) (:y integer) (:width integer) (:height integer)) null)
+(defun composer-paint-preview (workbench &key x y width height)
+  "Draw the command that the draft names under the editor of the composer.
+
+The command is set as code in the ink of code among prose, and its description
+follows in the meta ink. A command that needs the terminal says so in amber."
+  (let ((preview (composer-draft-preview workbench)))
+    (when preview
+      (let* ((code    (text-style ':label-bold :color *blue*))
+             (meta    (text-style ':meta))
+             (caveat  (text-style ':meta :color *amber*))
+             (limit   (+ x width))
+             (cursor  x))
+        (labels ((draw (text style)
+                   (let ((room (max 0 (- limit cursor))))
+                     (when (plusp room)
+                       (let* ((fitted  (text-fit text style room))
+                              (painted (plusp (length fitted))))
+                         (when painted
+                           (paint-text-in fitted style
+                                          :x cursor :y y :width room :height height)
+                           (incf cursor (text-width fitted style)))
+                         (and painted (>= (length fitted) (length text))))))))
+          (when (draw (if (plusp (length (command-preview-hint preview)))
+                          (format nil "(~A ~A"
+                                  (command-preview-name preview)
+                                  (command-preview-hint preview))
+                          (format nil "(~A" (command-preview-name preview)))
+                      code)
+            (when (plusp (length (command-preview-detail preview)))
+              (draw " · " meta)
+              (draw (command-preview-detail preview) meta))
+            (when (command-preview-note preview)
+              (draw " · " meta)
+              (draw (command-preview-note preview) caveat)))))))
+  nil)
+
 (-> composer-height (workbench integer) integer)
 (defun composer-height (workbench width)
-  "Return the height of the composer frame at WIDTH, including the attachments, the text and the toolbar."
+  "Return the height of the composer frame at WIDTH, including the attachments, the text, the command preview and the toolbar."
   (+ 10
      (if (workbench-attachments workbench) 30 0)
      (composer-text-height workbench (- width 28))
      6
+     (composer-preview-height workbench)
      *composer-toolbar-height*
      4))
 
@@ -380,6 +470,16 @@ of a line, Ctrl-K is left unused, so that it can open the list of commands."
                       :action  (lambda ()
                                  (composer--choose-mode workbench :x chip-x :y (- chip-y 4)))
                       :tooltip (and mode (third mode))))))
+      ;; Draw the preview of the command that the draft names, under the editor.
+      (when (plusp (composer-preview-height workbench))
+        (destructuring-bind (editor-x editor-y editor-width editor-height)
+            (composer-editor-box workbench :x x :y y :width width :height height)
+          (declare (ignore editor-x editor-width))
+          (composer-paint-preview workbench
+                                  :x      (+ x 12)
+                                  :y      (+ editor-y editor-height 2)
+                                  :width  (- width 24)
+                                  :height *composer-preview-height*)))
     ;; Draw the send button, or the stop button while the agent works. The
     ;; distance to the right edge is the same as the distance to the bottom.
     (let ((button-x (- (+ x width) 32 8)))
@@ -415,4 +515,5 @@ of a line, Ctrl-K is left unused, so that it can open the list of commands."
           top
           (- width 24)
           (max *composer-line-height*
-               (- (+ y height) top *composer-toolbar-height* 8)))))
+               (- (+ y height) top *composer-toolbar-height* 8
+                  (composer-preview-height workbench))))))
