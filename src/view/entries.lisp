@@ -309,14 +309,17 @@ Removed lines are red and added lines are green."
 
 (-> entries--preview (string &key (:lines integer)) string)
 (defun entries--preview (text &key (lines *output-preview-lines*))
-  "Return the first LINES lines of TEXT and the number of lines that are left out."
-  (let* ((limit lines)
-         (lines (markdown-lines (string-right-trim '(#\Newline #\Space) text)))
-         (shown (if (> (length lines) limit)
-                    (subseq lines 0 limit)
-                    lines)))
-    (format nil "~{~A~^~%~}~@[~%… ~D more lines~]" shown
-            (and (> (length lines) (length shown)) (- (length lines) (length shown))))))
+  "Show the beginning and end of TEXT, marking material omitted for display."
+  (let* ((length (length text))
+         (sample (if (> length 16000)
+                     (format nil "~A~%… ~D characters omitted …~%~A" (subseq text 0 12000) (- length 16000) (subseq text (- length 4000)))
+                     text))
+         (rows   (markdown-lines (string-right-trim '(#\Newline) sample)))
+         (count  (length rows))
+         (tail   (max 1 (floor lines 4))))
+    (if (<= count lines) sample
+        (format nil "~{~A~%~}… ~D lines omitted …~%~{~A~^~%~}"
+                (subseq rows 0 (- lines tail)) (- count lines) (last rows tail)))))
 
 (defparameter *lisp-argument-names* '("forms" "form" "definition" "source" "expression" "code")
   "A list of the argument names that hold the source for tools that evaluate Lisp.")
@@ -358,15 +361,25 @@ several lines. Return NIL twice if the call has no Lisp source."
 (-> entries--result-blocks (tool-entry string) list)
 (defun entries--result-blocks (entry output)
   "Render tool output, with separate blocks for captured shell streams."
-  (let* ((details (and (string= (tool-entry-name entry) "shell.run") (tool-entry-details entry)))
-         (streams (getf details :output-streams))
-         (log     (first (getf details :shell-logs)))
-         (exit    (or (getf details :exit-code) (getf log :exit-code)))
-         (status  (remove nil (list (and exit (format nil "exit ~D" exit))
-                                    (and (or (getf details :timed-out-p) (getf log :timed-out-p)) "timed out")
-                                    (and (or (getf details :cancelled-p) (getf log :cancelled-p)) "cancelled")
-                                    (and (getf details :capture-diagnostic) "output capture problem"))))
-         (lisp-p  (entries--lisp-tool-p entry)))
+  (let* ((raw      (tool-entry-details entry))
+         (details  (and (equal (tool-entry-name entry) "shell.run") (job-view--fields-p raw) raw))
+         (sections (getf details :output-streams))
+         (streams  (and (alexandria:proper-list-p sections)
+                        (every (lambda (section)
+                                 (and (job-view--fields-p section)
+                                      (member (getf section :stream) '(:combined :stdout :stderr))
+                                      (typep (getf section :head) '(or null string))
+                                      (typep (getf section :tail) '(or null string)))) sections)
+                        sections))
+         (logs     (getf details :shell-logs))
+         (log      (and (consp logs) (job-view--fields-p (first logs)) (first logs)))
+         (exit     (or (getf details :exit-code) (getf log :exit-code)))
+         (status   (remove nil (list (and (integerp exit) (format nil "exit ~D" exit))
+                                     (and (or (getf details :timed-out-p) (getf log :timed-out-p)) "timed out")
+                                     (and (or (getf details :cancelled-p) (getf log :cancelled-p)) "cancelled")
+                                     (and (getf details :capture-diagnostic) (format nil "capture: ~A" (getf details :capture-diagnostic))))))
+         (lisp-p   (and (not (eq (tool-entry-status entry) ':failed))
+                        (member (tool-entry-name entry) '("lisp.eval" "self.eval" "lisp.source") :test #'equal))))
     (flet ((block-for (text label)
              (let ((shown (entries--preview (if lisp-p (entries--lisp-output text) text)
                                             :lines *output-open-lines*)))
@@ -375,7 +388,9 @@ several lines. Return NIL twice if the call has no Lisp source."
                                               (code-spans shown "lisp"))
                                              ((patch-p shown)
                                               (patch-spans shown)))))))
-      (append (when status (list (block-for (format nil "~{~A~^ · ~}" status) "status")))
+      (append (when status (list (make-text-block (list (make-span (format nil "~{~A~^ · ~}" status) nil))
+                                                  :style         (text-style ':label-bold :color (if (eq (tool-entry-status entry) ':failed) *red* *ink*))
+                                                  :margin-bottom 6)))
               (if streams
                   (loop for section in streams
                         for stream = (getf section :stream)
@@ -389,21 +404,46 @@ several lines. Return NIL twice if the call has no Lisp source."
                                                   (format nil "~A · incomplete" label))
                                                  (t
                                                   label))))
-                  (list (block-for output (if (eq (tool-entry-status entry) ':failed) "failed" "result"))))))))
+                  (when (plusp (length output))
+                    (list (block-for output (if (eq (tool-entry-status entry) ':failed) "Failed" "Result")))))
+              (loop for item in (let ((captures (getf log :captures))) (and (alexandria:proper-list-p captures) captures))
+                    for reference = (and (job-view--fields-p item) (getf item :reference))
+                    when (stringp reference) collect (block-for reference "Retained log"))))))
+
+(-> entries--ordinary-input (list) list)
+(defun entries--ordinary-input (arguments)
+  "Set an assignment, message or description as prose, with other inputs listed underneath."
+  (let ((prose nil) (fields nil))
+    (loop for pair in arguments for (key . value) = pair do
+      (if (and (stringp value) (member key '("task" "context" "text" "description" "content" "title") :test #'equal))
+          (push (make-text-block (list (make-span (format nil "~A~%" (string-capitalize key)) (text-style ':label-bold))
+                                       (make-span (entries--preview value :lines 40) nil))
+                                 :style (text-style ':small) :margin-bottom 8) prose)
+          (push pair fields)))
+    (append (nreverse prose) (entries--argument-blocks (nreverse fields)))))
 
 (-> entries--argument-blocks (list) list)
 (defun entries--argument-blocks (arguments)
-  "Return the blocks that list ARGUMENTS, one on each line, or NIL if there are no arguments.
-
-ARGUMENTS is an association list of names and decoded values."
+  "Lay out ordinary arguments as labeled fields. Indent nested objects and array members."
   (when arguments
-    (list (make-code-block
-           (format nil "~{~A~^~%~}"
-                   (mapcar (lambda (member)
-                             (format nil "~A: ~A" (first member) (entries--value-text (rest member))))
-                           arguments))
-           :label         "arguments"
-           :margin-bottom 8))))
+    (let ((remaining 100))
+      (labels ((row (out key value depth)
+                 (when (plusp remaining)
+                   (decf remaining)
+                   (format out "~&~V@T~A:" (* 2 depth) key)
+                   (cond ((and (consp value) (< depth 6))
+                          (if (and (consp (first value)) (stringp (first (first value))))
+                              (loop for (label . item) in value while (plusp remaining) do (row out label item (1+ depth)))
+                              (loop for item in value for index from 1 while (plusp remaining) do (row out index item (1+ depth)))))
+                         ((consp value)
+                          (write-string " … nested value" out))
+                         (t
+                          (format out " ~A" (entries--preview (entries--value-text value) :lines 20)))))))
+        (list (make-code-block (entries--preview
+                                (with-output-to-string (out)
+                                  (loop for (key . value) in arguments while (plusp remaining) do (row out key value 0))
+                                  (when (zerop remaining) (format out "~%… field limit reached"))) :lines 100)
+                               :label "Input" :margin-bottom 8))))))
 
 (-> entries--edit-operation (list) string)
 (defun entries--edit-operation (operation)
@@ -459,7 +499,7 @@ The detail contains the input of the call and the result. The input is shown as 
 command, Lisp source, a diff or a list of arguments."
   (let* ((arguments (tool-entry-arguments entry))
          (output    (tool-entry-output entry))
-         (command   (entries--argument entry "command"))
+         (command   (and (equal (tool-entry-name entry) "shell.run") (entries--argument entry "command")))
          (old-text  (entries--argument entry "old-text" "old_text" "old"))
          (new-text  (entries--argument entry "new-text" "new_text" "new" "content")))
     (multiple-value-bind (source source-name) (if (entries--lisp-tool-p entry)
@@ -472,35 +512,36 @@ command, Lisp source, a diff or a list of arguments."
        :padding-y     2
        :margin-bottom 10
        :children
-       (append
-        (cond
-          ;; A command and the other arguments of the call, such as the
-          ;; shell session.
-          ((stringp command)
-           (cons (make-code-block command
-                                  :label         "command"
-                                  :spans         (code-spans command "bash")
-                                  :margin-bottom 8)
-                 (entries--argument-blocks (remove "command" arguments :key #'first :test #'equal))))
-          (source
-           (cons (make-code-block source
-                                  :label         source-name
-                                  :spans         (code-spans source "lisp")
-                                  :margin-bottom 8)
-                 (entries--argument-blocks (remove source-name arguments :key #'first :test #'equal))))
-          ((or (stringp old-text) (stringp new-text))
-           (let* ((path (entries--argument entry "path" "uri"))
-                  (old  (if (stringp old-text) old-text ""))
-                  (new  (if (stringp new-text) new-text "")))
-             (list (make-code-block ""
-                                    :label         (if (stringp path) path "change")
-                                    :spans         (or (edit-spans old new :pathname (and (stringp path) path))
-                                                       (entries--diff-spans old new))
-                                    :margin-bottom 8))))
-          (t
-           (entries--argument-blocks arguments)))
-        (when output
-          (entries--result-blocks entry output)))))))
+       (or (entries--file-tool-blocks entry)
+           (append
+            (cond
+              ;; A command and the other arguments of the call, such as the
+              ;; shell session.
+              ((stringp command)
+               (cons (make-code-block command
+                                      :label         "command"
+                                      :spans         (code-spans command "bash")
+                                      :margin-bottom 8)
+                     (entries--ordinary-input (remove "command" arguments :key #'first :test #'equal))))
+              (source
+               (cons (make-code-block source
+                                      :label         source-name
+                                      :spans         (code-spans source "lisp")
+                                      :margin-bottom 8)
+                     (entries--ordinary-input (remove source-name arguments :key #'first :test #'equal))))
+              ((and (equal (tool-entry-name entry) "fs.edit") (or (stringp old-text) (stringp new-text)))
+               (let* ((path (entries--argument entry "path" "uri"))
+                      (old  (if (stringp old-text) old-text ""))
+                      (new  (if (stringp new-text) new-text "")))
+                 (list (make-code-block ""
+                                        :label         (if (stringp path) path "change")
+                                        :spans         (or (edit-spans old new :pathname (and (stringp path) path))
+                                                           (entries--diff-spans old new))
+                                        :margin-bottom 8))))
+              (t
+               (entries--ordinary-input arguments)))
+            (or (entries--job-tool-blocks entry) (entries--evaluation-result-blocks entry) (entries--mcp-result-blocks entry)
+                (when (or output (tool-entry-details entry)) (entries--result-blocks entry (or output ""))))))))))
 
 (-> entries--preview-spans (tool-entry) list)
 (defun entries--preview-spans (entry)
@@ -531,7 +572,7 @@ Commands are highlighted as shell, Lisp is highlighted as Lisp, and the rest is 
   "Draw a tool call as one row that contains the name of the tool and the preview.
 
 The arguments and the result are shown in the opened row. A plan update is drawn as the plan."
-  (if (string= (tool-entry-name entry) "plan.update")
+  (if (and (string= (tool-entry-name entry) "plan.update") (eq (tool-entry-status entry) ':completed))
       (entries--plan-blocks entry)
       (let* ((status     (tool-entry-status entry))
              (expanded-p (entry-expanded-p entry))

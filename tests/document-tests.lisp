@@ -91,3 +91,26 @@ The estimated height of an entry is equal to the real height."
       (fiveam:is (= 100 (item-height (aref items 0))))
       ;; The same entry is at the top of the view as before.
       (fiveam:is (= (item-top (aref items 500)) (document-scroll document))))))
+
+(fiveam:test prose-input-is-not-a-file-addition
+  (let* ((entry  (make-instance 'tool-entry :name "papercut.report" :status ':completed
+                                :arguments '(("content" . "Clicking Retry closed the window.") ("tags" "UI" "Linux"))
+                                :output    "Recorded."))
+         (blocks (box-block-children (entries--tool-detail entry))))
+    (fiveam:is (typep (first blocks) 'text-block))
+    (fiveam:is (search "Clicking Retry" (paragraph-text (text-block-paragraph (first blocks)))))
+    (fiveam:is (search "Linux" (paragraph-text (code-block-paragraph (second blocks)))))))
+
+(fiveam:test a-failed-plan-shows-the-error-instead-of-a-checklist
+  (let* ((entry  (make-instance 'tool-entry :name "plan.update" :status ':failed :expanded-p t
+                                :output "Unknown step."))
+         (detail (second (entry-blocks entry (constantly nil)))))
+    (fiveam:is (equal "Unknown step." (paragraph-text (code-block-paragraph (first (box-block-children detail))))))))
+
+(fiveam:test bounded-tool-output-retains-the-final-diagnostic
+  (let* ((message (format nil "Start~%~A~%Disk full" (make-string 20000 :initial-element #\a)))
+         (preview (entries--preview message :lines 3)))
+    (fiveam:is (uiop:string-prefix-p "Start" preview))
+    (fiveam:is (uiop:string-suffix-p preview "Disk full"))
+    (fiveam:is (search "omitted" preview))
+    (fiveam:is (< (length preview) (length message)))))
