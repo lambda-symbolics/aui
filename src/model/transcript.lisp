@@ -120,6 +120,11 @@ The result of the call contains the same identifier.")
     :accessor      tool-entry-arguments
     :type          list
     :documentation "The arguments of the call as an association list of names and values, in the given order.")
+   (show-details-p
+    :initform      nil
+    :accessor      tool-entry-show-details-p
+    :type          boolean
+    :documentation "Whether secondary call parameters and diagnostics are visible.")
    (status
     :initarg       :status
     :initform      ':pending

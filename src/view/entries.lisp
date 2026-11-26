@@ -412,15 +412,11 @@ several lines. Return NIL twice if the call has no Lisp source."
 
 (-> entries--ordinary-input (list) list)
 (defun entries--ordinary-input (arguments)
-  "Set an assignment, message or description as prose, with other inputs listed underneath."
-  (let ((prose nil) (fields nil))
-    (loop for pair in arguments for (key . value) = pair do
-      (if (and (stringp value) (member key '("task" "context" "text" "description" "content" "title") :test #'equal))
-          (push (make-text-block (list (make-span (format nil "~A~%" (string-capitalize key)) (text-style ':label-bold))
-                                       (make-span (entries--preview value :lines 40) nil))
-                                 :style (text-style ':small) :margin-bottom 8) prose)
-          (push pair fields)))
-    (append (nreverse prose) (entries--argument-blocks (nreverse fields)))))
+  "Show the human-authored part of the request without its transport fields."
+  (loop for (key . value) in arguments
+        when (and (stringp value) (member key '("task" "text" "content" "title") :test #'equal))
+          collect (make-text-block (list (make-span (entries--preview value :lines 40) nil))
+                                   :style (text-style ':small) :margin-bottom 8)))
 
 (-> entries--argument-blocks (list) list)
 (defun entries--argument-blocks (arguments)
@@ -492,8 +488,8 @@ several lines. Return NIL twice if the call has no Lisp source."
                    (when (and output (or (getf details :delimiter-warning-p) (null operations)))
                      (entries--result-blocks entry output)))))))
 
-(-> entries--tool-detail (tool-entry) flow-block)
-(defun entries--tool-detail (entry)
+(-> entries--tool-detail (tool-entry &optional function) flow-block)
+(defun entries--tool-detail (entry &optional (toggle (constantly nil)))
   "Return the opened detail of the tool call ENTRY.
 
 The detail contains the input of the call and the result. The input is shown as a
@@ -506,37 +502,49 @@ command, Lisp source, a diff or a list of arguments."
     (multiple-value-bind (source source-name) (if (entries--lisp-tool-p entry)
                                                   (entries--lisp-source entry)
                                                   (values nil nil))
-      (make-instance
-       'box-block
-       :frame-p       nil
-       :padding-x     28
-       :padding-y     2
-       :margin-bottom 10
-       :children
-       (or (entries--file-tool-blocks entry)
-           (append
-            (cond
-              ((stringp command)
-               (list (make-text-block (code-spans command "bash") :style (text-style ':code) :margin-bottom 6)))
-              (source
-               (cons (make-code-block source
-                                      :label         source-name
-                                      :spans         (code-spans source "lisp")
-                                      :margin-bottom 8)
-                     (entries--ordinary-input (remove source-name arguments :key #'first :test #'equal))))
-              ((and (equal (tool-entry-name entry) "fs.edit") (or (stringp old-text) (stringp new-text)))
-               (let* ((path (entries--argument entry "path" "uri"))
-                      (old  (if (stringp old-text) old-text ""))
-                      (new  (if (stringp new-text) new-text "")))
-                 (list (make-code-block ""
-                                        :label         (if (stringp path) path "change")
-                                        :spans         (or (edit-spans old new :pathname (and (stringp path) path))
-                                                           (entries--diff-spans old new))
-                                        :margin-bottom 8))))
-              (t
-               (entries--ordinary-input arguments)))
-            (or (entries--job-tool-blocks entry) (entries--evaluation-result-blocks entry) (entries--mcp-result-blocks entry)
-                (when (or output (tool-entry-details entry)) (entries--result-blocks entry (or output ""))))))))))
+      (let* ((parameters (unless command
+                           (remove-if (lambda (pair)
+                                        (or (equal (first pair) source-name)
+                                            (and (stringp (rest pair)) (member (first pair) '("task" "text" "content" "title") :test #'equal))))
+                                      arguments)))
+             (evaluation (and (job-view--fields-p (tool-entry-details entry)) (getf (tool-entry-details entry) :evaluation)))
+             (trace      (and (equal (tool-entry-status entry) ':failed) (job-view--fields-p evaluation)
+                              (portable-string (getf evaluation :backtrace)))))
+       (make-instance
+        'box-block
+        :frame-p       nil
+        :padding-x     28
+        :padding-y     2
+        :margin-bottom 10
+        :children
+        (or (entries--file-tool-blocks entry)
+            (append
+             (cond
+               ((stringp command)
+                (list (make-text-block (code-spans command "bash") :style (text-style ':code) :margin-bottom 6)))
+               (source
+                (list (make-text-block (code-spans source "lisp") :style (text-style ':code) :margin-bottom 6)))
+               ((and (equal (tool-entry-name entry) "fs.edit") (or (stringp old-text) (stringp new-text)))
+                (let* ((path (entries--argument entry "path" "uri"))
+                       (old  (if (stringp old-text) old-text ""))
+                       (new  (if (stringp new-text) new-text "")))
+                  (list (make-code-block ""
+                                         :label         (if (stringp path) path "change")
+                                         :spans         (or (edit-spans old new :pathname (and (stringp path) path))
+                                                            (entries--diff-spans old new))
+                                         :margin-bottom 8))))
+               (t
+                (entries--ordinary-input arguments)))
+             (or (entries--job-tool-blocks entry) (entries--evaluation-result-blocks entry) (entries--mcp-result-blocks entry)
+                 (when (or output (tool-entry-details entry)) (entries--result-blocks entry (or output ""))))
+             (when (or parameters trace)
+               (cons (make-instance 'row-block :identifier (list ':call-details (entry-identifier entry))
+                                    :mark                  (if (tool-entry-show-details-p entry) ':open ':closed)
+                                    :title (list (make-span "Details" nil)) :style (text-style ':meta)
+                                    :action                (lambda () (funcall toggle t)))
+                     (when (tool-entry-show-details-p entry)
+                       (append (entries--argument-blocks parameters)
+                               (when trace (list (make-code-block (entries--preview trace :lines 60) :label "Backtrace"))))))))))))))
 
 (-> entries--preview-spans (tool-entry) list)
 (defun entries--preview-spans (entry)
@@ -596,7 +604,7 @@ The arguments and the result are shown in the opened row. A plan update is drawn
           (cond ((equal (tool-entry-name entry) "resource.edit")
                  (cons row (entries--resource-edit-blocks entry expanded-p)))
                 (expanded-p
-                 (list row (entries--tool-detail entry)))
+                 (list row (entries--tool-detail entry toggle)))
                 (t
                  (list row))))))
 

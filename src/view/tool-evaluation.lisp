@@ -54,7 +54,8 @@
                                    (format nil "~:{~A: ~A~:^~%~}"
                                            (mapcar (lambda (pair) (mapcar #'evaluation--preview pair)) restarts))))
                         (section "retry" (getf sections :retry))
-                        (section "backtrace" (getf sections :backtrace))
-                        (when (getf sections :values)
+                        (when (and (getf sections :values)
+                                   (or (portable-string (getf sections :values))
+                                       (not (portable-string (getf sections :output)))))
                           (section "values" (or (portable-string (getf sections :values)) "(no values)")
                                    :lisp-p (plusp (length (getf sections :values))))))))))))

@@ -99,7 +99,13 @@ The estimated height of an entry is equal to the real height."
          (blocks (box-block-children (entries--tool-detail entry))))
     (fiveam:is (typep (first blocks) 'text-block))
     (fiveam:is (search "Clicking Retry" (paragraph-text (text-block-paragraph (first blocks)))))
-    (fiveam:is (search "Linux" (paragraph-text (code-block-paragraph (second blocks)))))))
+    (fiveam:is (typep (third blocks) 'row-block))
+    (let* ((document (make-document (make-transcript))))
+      (setf (entry-expanded-p entry) t)
+      (transcript-append (document-transcript document) entry)
+      (funcall (row-block-action (third (box-block-children (second (document--entry-blocks document entry))))))
+      (let ((fields (first (last (box-block-children (entries--tool-detail entry))))))
+        (fiveam:is (search "Linux" (paragraph-text (code-block-paragraph fields))))))))
 
 (fiveam:test a-failed-plan-shows-the-error-instead-of-a-checklist
   (let* ((entry  (make-instance 'tool-entry :name "plan.update" :status ':failed :expanded-p t

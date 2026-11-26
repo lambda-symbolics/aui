@@ -128,8 +128,10 @@
   "Typeset ENTRY into blocks. If the entry is opened or closed by a click, the transcript is touched."
   (let ((transcript (document-transcript document)))
     (entry-blocks entry
-                  (lambda ()
-                    (setf (entry-expanded-p entry) (not (entry-expanded-p entry)))
+                  (lambda (&optional details-p)
+                    (if details-p
+                        (setf (tool-entry-show-details-p entry) (not (tool-entry-show-details-p entry)))
+                        (setf (entry-expanded-p entry) (not (entry-expanded-p entry))))
                     (transcript-touch transcript entry)))))
 
 (-> document--current-p (document item) boolean)

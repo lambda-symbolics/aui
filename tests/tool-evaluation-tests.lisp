@@ -13,14 +13,14 @@
            (loop for block in (entries--evaluation-result-blocks
                                (make-instance 'tool-entry :name name :status status :details details))
                  collect (list (code-block-label block) (paragraph-text (code-block-paragraph block))))))
-    (fiveam:is (equal '(("description" "(printed, not Lisp)") ("values" "(no values)"))
+    (fiveam:is (equal '(("description" "(printed, not Lisp)"))
                       (sections "lisp.describe" ':completed
                                 '(:evaluation (:output "(printed, not Lisp)" :values "")))))
     (fiveam:is (equal '(("values" "NIL"))
                       (sections "procedure.run" ':completed '(:evaluation (:values "NIL")))))
     (fiveam:is (equal (list '("condition" "unbound variable") '("output" "before failure")
                             (list "available restarts" (format nil "USE: supply value~%ABORT: stop"))
-                            '("retry" "supply :restart") '("backtrace" "0: frame"))
+                            '("retry" "supply :restart"))
                       (sections "self.eval" ':failed
                                 '(:evaluation (:condition "unbound variable" :output "before failure"
                                                :restarts (("USE" "supply value") ("ABORT" "stop"))
