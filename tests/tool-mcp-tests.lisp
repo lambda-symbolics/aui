@@ -22,7 +22,7 @@
                                                       (list ':structured (- (length output) (length json)) (length output)))
                         :structured-content     '(:mcp-object ("flags" (:mcp-array :mcp-false t)))))
          (blocks  (mcp-view-test--blocks output details)))
-    (fiveam:is (equal '("text" "structured fields") (mapcar #'code-block-label blocks)))
+    (fiveam:is (equal '(nil "Structured fields") (mapcar #'code-block-label blocks)))
     (fiveam:is (equal (list message (format nil "flags: ~%  • false~%  • true"))
                       (mapcar (lambda (block) (paragraph-text (code-block-paragraph block))) blocks)))))
 

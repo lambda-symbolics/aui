@@ -96,7 +96,7 @@
                                               (mcp-view--fields (getf (rest details) :structured-content)))))
                       (when (and structured-p (not fields)) (return-from entries--mcp-result-blocks nil))
                       (make-code-block (or fields (mcp-view--slice output start end))
-                                       :label (if fields "structured fields" "text") :margin-bottom 8))
+                                       :label (when (> count 1) (and fields "Structured fields")) :margin-bottom 8))
           else when (= index 9)
                  collect (make-text-block (list (make-span (format nil "… ~D sections omitted from view" (- count 12)) nil))
                                           :margin-bottom 8))))
