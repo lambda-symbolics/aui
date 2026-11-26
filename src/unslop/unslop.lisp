@@ -413,8 +413,8 @@ when you stop typing. Nothing is committed.
     (unslop-arrange desk)
     (cond
       (unseen
-         (save-window-picture (desk-window desk) (unslop-launch-shot launch))
-       (t
+        (save-window-picture (desk-window desk) (unslop-launch-shot launch)))
+      (t
         (setf *stage-failure-function*
               (lambda (report)
                 (setf (desk-notice desk) report)
@@ -441,7 +441,7 @@ when you stop typing. Nothing is committed.
              (when (stage-dirty-p (desk-stage desk))
                (unslop-arrange desk))
              (stage-flush (desk-stage desk)))))
-        (desk-leave desk))))
+        (desk-leave desk)))
     nil))
 
 (-> unslop-main (&optional list) null)
