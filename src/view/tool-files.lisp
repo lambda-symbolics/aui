@@ -127,36 +127,27 @@
          (completed-p (eq (tool-entry-status entry) ':completed)))
     (when (and (or read-p content-p (member name '("search.files" "search.glob") :test #'equal))
                (or completed-p failed-p))
-      (let* ((primary (cond (read-p
-                             "uri")
-                            ((equal name "search.glob")
-                             "pattern")
-                            ((entries--argument entry "patterns")
-                             "patterns")
-                            (t
-                             "query")))
-             (cause   (and failed-p (listp details) (getf details :cause)))
-             (spans   (cond
-                        (failed-p
-                         (let ((reason (if (and (stringp cause) (plusp (length cause))) cause output)))
-                           (when reason
-                             (list (make-span (file-tool--clip (entries--preview reason :lines 10))
-                                              (text-style ':code :color *red*))))))
-                        (read-p
-                         (or (and (listp details) (file-tool--window details))
-                             (and output (plusp (length output))
-                                  (file-tool--read-output output (let ((uri (entries--argument entry "uri")))
-                                                                   (and (stringp uri) uri))))))
-                        ((and output (plusp (length output)))
-                         (file-tool--search-spans output content-p))))
-             (label   (cond (failed-p
-                             "Error")
-                            (read-p
-                             (if (and (listp details) (getf details :lines)) "Source" "Resource"))
-                            (content-p
-                             "Matches")
-                            (t
-                             "Files"))))
+      (let* ((cause (and failed-p (listp details) (getf details :cause)))
+             (spans (cond
+                      (failed-p
+                       (let ((reason (if (and (stringp cause) (plusp (length cause))) cause output)))
+                         (when reason
+                           (list (make-span (file-tool--clip (entries--preview reason :lines 10))
+                                            (text-style ':code :color *red*))))))
+                      (read-p
+                       (or (and (listp details) (file-tool--window details))
+                           (and output (plusp (length output))
+                                (file-tool--read-output output (let ((uri (entries--argument entry "uri")))
+                                                                 (and (stringp uri) uri))))))
+                      ((and output (plusp (length output)))
+                       (file-tool--search-spans output content-p))))
+             (label (cond (failed-p
+                           "Error")
+                          (read-p
+                           (if (and (listp details) (getf details :lines)) "Source" "Resource"))
+                          (content-p
+                           "Matches")
+                          (t
+                           "Files"))))
         (when spans
-          (append (entries--argument-blocks (remove primary (tool-entry-arguments entry) :key #'first :test #'equal))
-                  (list (make-code-block "" :spans spans :label label :margin-bottom 8))))))))
+          (list (make-code-block "" :spans spans :label label :margin-bottom 8)))))))
