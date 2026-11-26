@@ -17,10 +17,10 @@
   (let* ((job     '(:id "exec:4" :type :tool :state :running :tool "shell.run" :owner "private"))
          (handoff (list ':tool-execution :handed-off-p t :handoff-reason ':grace-expired :job job))
          (child   '(:id "review-1" :type :task :state :queued)))
-    (fiveam:is (equal '("Sent to background" "running   exec:4   shell.run")
+    (fiveam:is (equal '("running   exec:4   shell.run")
                       (job-view-test--lines "shell.run" handoff)))
     (fiveam:is (null (job-view-test--lines "shell.run" handoff :status ':failed)))
-    (fiveam:is (equal '("Child agents" "queued   review-1   child agent")
+    (fiveam:is (equal '("queued   review-1   child agent")
                       (job-view-test--lines "child.spawn" (list ':task-run :succeeded-p t :results (list child)))))))
 
 (fiveam:test job-pages-use-the-recorded-range
@@ -31,3 +31,10 @@
     (fiveam:is (equal '("No jobs") (job-view-test--lines "job.list" '(:job-list :jobs nil :count 0 :offset 0 :total 0))))
     (fiveam:is (null (job-view-test--lines "job.list" '(:job-list :count 0 :offset 0 :total 0))))
     (fiveam:is (null (job-view-test--lines "job.list" '(:job-list :jobs ((:state)) :count 1 :offset 0 :total 1))))))
+
+(fiveam:test inspected-jobs-show-their-outcome
+  (let* ((job    '(:id "exec:3" :type :tool :tool "shell.run" :state :failed :result (:error "Disk full")))
+         (entry  (make-instance 'tool-entry :name "job.get" :status ':completed :details (list ':job-get :job job)))
+         (blocks (entries--job-tool-blocks entry)))
+    (fiveam:is (search "failed" (paragraph-text (text-block-paragraph (first blocks)))))
+    (fiveam:is (equal "Disk full" (paragraph-text (code-block-paragraph (second blocks)))))))

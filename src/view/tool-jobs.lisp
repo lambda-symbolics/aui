@@ -62,14 +62,31 @@
            (when (and row (eq t (getf fields :handed-off-p))
                       (member (getf fields :handoff-reason) '(:requested :grace-expired))
                       (member (getf (getf fields :job) :state) '(:queued :running)))
-             (list (job-view--heading "Sent to background") row))))
+             (list row))))
         (:task-run
          (when (and (string= name "child.spawn") (eq t (getf fields :succeeded-p)))
            (let* ((jobs (getf fields :results))
                   (rows (job-view--rows jobs)))
              (when (and rows (every (lambda (job) (and (eq (getf job :type) ':task)
                                                        (null (getf job :result)))) jobs))
-               (cons (job-view--heading "Child agents") rows)))))
+               rows))))
+        ((:job-get :job-wait :job-cancel)
+         (let* ((job    (getf fields :job))
+                (row    (and (equal name (ecase tag (:job-get
+                                                     "job.get")
+                                                    (:job-wait
+                                                     "job.wait")
+                                                    (:job-cancel
+                                                     "job.cancel")))
+                             (job-view--row job)))
+                (result (and row (getf job :result))))
+           (when (and row (job-view--fields-p result))
+             (let ((report (or (portable-string (getf result :error)) (portable-string (getf result :content)))))
+               (when (or (null result) report)
+                 (append (when (eq tag ':job-cancel)
+                           (list (job-view--heading (if (getf fields :accepted-p) "Cancellation requested" "Cancellation not accepted"))))
+                         (list row)
+                         (when report (list (make-code-block (entries--preview report :lines 40))))))))))
         (:job-list
          (when (string= name "job.list")
            (let* ((jobs   (getf fields :jobs ':missing))
