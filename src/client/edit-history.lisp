@@ -107,7 +107,7 @@
            (operations (edit-history--field args "operations"))
            (uri        (edit-history--header entry))
            (rows       (make-hash-table))
-           (empty-p nil))
+           (empty-p    nil))
       (when (and uri (stringp base) operations (listp operations) (<= (length operations) 100)
                  (every (lambda (op) (and (listp op) (every #'consp op))) operations))
         (loop for n downfrom (1- position) to (max 0 (- position 128))
