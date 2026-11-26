@@ -374,7 +374,7 @@ several lines. Return NIL twice if the call has no Lisp source."
          (logs     (getf details :shell-logs))
          (log      (and (consp logs) (job-view--fields-p (first logs)) (first logs)))
          (exit     (or (getf details :exit-code) (getf log :exit-code)))
-         (status   (remove nil (list (and (integerp exit) (format nil "exit ~D" exit))
+         (status   (remove nil (list (and (integerp exit) (not (zerop exit)) (format nil "exit ~D" exit))
                                      (and (or (getf details :timed-out-p) (getf log :timed-out-p)) "timed out")
                                      (and (or (getf details :cancelled-p) (getf log :cancelled-p)) "cancelled")
                                      (and (getf details :capture-diagnostic) (format nil "capture: ~A" (getf details :capture-diagnostic))))))
@@ -395,6 +395,9 @@ several lines. Return NIL twice if the call has no Lisp source."
                   (loop for section in streams
                         for stream = (getf section :stream)
                         for label = (if (member stream '(:stdout :stderr)) (string-downcase stream) "output")
+                        unless (and (getf section :complete-p) (not (getf section :unavailable-p))
+                                    (not (getf section :omitted-p)) (zerop (length (getf section :head)))
+                                    (zerop (length (getf section :tail))))
                         collect (block-for (concatenate 'string (or (getf section :head) "")
                                                         (if (getf section :omitted-p) (format nil "~%…~%") "")
                                                         (or (getf section :tail) ""))
@@ -403,12 +406,9 @@ several lines. Return NIL twice if the call has no Lisp source."
                                                  ((not (getf section :complete-p))
                                                   (format nil "~A · incomplete" label))
                                                  (t
-                                                  label))))
+                                                  (if (eq stream ':combined) nil label)))))
                   (when (plusp (length output))
-                    (list (block-for output (if (eq (tool-entry-status entry) ':failed) "Failed" "Result")))))
-              (loop for item in (let ((captures (getf log :captures))) (and (alexandria:proper-list-p captures) captures))
-                    for reference = (and (job-view--fields-p item) (getf item :reference))
-                    when (stringp reference) collect (block-for reference "Retained log"))))))
+                    (list (block-for output (if (eq (tool-entry-status entry) ':failed) "Failed" "Result")))))))))
 
 (-> entries--ordinary-input (list) list)
 (defun entries--ordinary-input (arguments)
@@ -516,14 +516,8 @@ command, Lisp source, a diff or a list of arguments."
        (or (entries--file-tool-blocks entry)
            (append
             (cond
-              ;; A command and the other arguments of the call, such as the
-              ;; shell session.
               ((stringp command)
-               (cons (make-code-block command
-                                      :label         "command"
-                                      :spans         (code-spans command "bash")
-                                      :margin-bottom 8)
-                     (entries--ordinary-input (remove "command" arguments :key #'first :test #'equal))))
+               (list (make-text-block (code-spans command "bash") :style (text-style ':code) :margin-bottom 6)))
               (source
                (cons (make-code-block source
                                       :label         source-name
@@ -592,7 +586,10 @@ The arguments and the result are shown in the opened row. A plan update is drawn
                           :title      (cons (make-span (format nil "~A  " (tool-entry-name entry))
                                                        (text-style ':label-bold
                                                                    :color (if (eq status ':failed) *red* *amber*)))
-                                            (entries--preview-spans entry))
+                                            (if (and expanded-p (equal (tool-entry-name entry) "shell.run")
+                                                     (stringp (entries--argument entry "command")))
+                                                nil
+                                                (entries--preview-spans entry)))
                           :trailing   (and seconds (entries--duration seconds))
                           :style      (text-style ':label)
                           :action     toggle)))

@@ -125,3 +125,18 @@ The estimated height of an entry is equal to the real height."
     (fiveam:is (= 2 (count-if (lambda (part)
                                 (and (search "defun" (span-text part)) (span-style part)
                                      (equal *plum* (text-style-color (span-style part))))) parts)))))
+
+(fiveam:test shell-detail-is-command-and-output-not-capture-bookkeeping
+  (let* ((entry  (make-instance 'tool-entry :name "shell.run" :status ':completed
+                                :arguments '(("command" . "make test") ("description" . "test") ("async" . :false))
+                                :output    "capture summary"
+                                :details   '(:exit-code 0 :output-streams ((:stream :combined :complete-p t :head "ok")
+                                                                           (:stream :stderr :complete-p t :head ""))
+                                             :shell-logs ((:captures ((:reference "shell-log:example")))))))
+         (blocks (box-block-children (entries--tool-detail entry))))
+    (fiveam:is (= 2 (length blocks)))
+    (fiveam:is (equal "make test" (paragraph-text (text-block-paragraph (first blocks)))))
+    (fiveam:is (equal "ok" (paragraph-text (code-block-paragraph (second blocks)))))
+    (setf (tool-entry-status entry) ':failed (getf (tool-entry-details entry) :exit-code) 2)
+    (let ((failure (second (box-block-children (entries--tool-detail entry)))))
+      (fiveam:is (search "2" (paragraph-text (text-block-paragraph failure)))))))
