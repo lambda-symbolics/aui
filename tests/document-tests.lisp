@@ -114,3 +114,14 @@ The estimated height of an entry is equal to the real height."
     (fiveam:is (uiop:string-suffix-p preview "Disk full"))
     (fiveam:is (search "omitted" preview))
     (fiveam:is (< (length preview) (length message)))))
+
+(fiveam:test edited-source-has-syntax-inside-the-diff-gutters
+  (let* ((patch (format nil "--- workspace:x.lisp~%+++ workspace:x.lisp~%@@ -1,1 +1,2 @@~%-(defun old () 1)~%+(defun new ()~%+  2)~%"))
+         (parts (patch-spans patch :pathname "x.lisp")))
+    (fiveam:is (equal patch (format nil "~{~A~}" (mapcar #'span-text parts))))
+    (dolist (change (list (cons "-" *red*) (cons "+" *green*)))
+      (let ((mark (find (first change) parts :key #'span-text :test #'equal)))
+        (fiveam:is (and mark (equal (text-style-color (span-style mark)) (rest change))))))
+    (fiveam:is (= 2 (count-if (lambda (part)
+                                (and (search "defun" (span-text part)) (span-style part)
+                                     (equal *plum* (text-style-color (span-style part))))) parts)))))

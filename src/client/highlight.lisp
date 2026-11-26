@@ -27,6 +27,14 @@ If LANGUAGE is NIL, use the file type of PATHNAME instead."
                 (member (pathname-type (pathname pathname)) *lisp-file-types* :test #'equal)))
        t))
 
+(-> highlight-resource-path (t) (or null string))
+(defun highlight-resource-path (uri)
+  "Return the path used to classify a file resource's syntax, without reading the file."
+  (when (stringp uri)
+    (loop for prefix in '("workspace:" "scratchpad:" "skill-source:")
+          when (uiop:string-prefix-p prefix uri) return (subseq uri (length prefix))
+          finally (return (and (uiop:absolute-pathname-p uri) uri)))))
+
 (-> source-highlight (string &key (:language (or null string)) (:pathname (or null string))) list)
 (defun source-highlight (source &key language pathname)
   "Return (ROLE . TEXT) spans for SOURCE, or NIL if highlighting is unavailable.
