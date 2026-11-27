@@ -169,13 +169,19 @@ The result of the call contains the same identifier.")
     :initform      ""
     :reader        notice-entry-text
     :type          string
-    :documentation "The one-line statement of the notice.")
+    :documentation "The statement of the notice.")
+   (body
+    :initarg       :body
+    :initform      nil
+    :reader        notice-entry-body
+    :type          (or null string)
+    :documentation "Supporting text shown below the notice without opening it, or NIL.")
    (detail
     :initarg       :detail
     :initform      nil
     :reader        notice-entry-detail
     :type          (or null string)
-    :documentation "A longer text shown beneath the statement, or NIL.")
+    :documentation "A longer text shown after opening the notice, or NIL.")
    (channel
     :initarg       :channel
     :initform      nil

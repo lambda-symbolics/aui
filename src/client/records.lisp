@@ -381,6 +381,51 @@ Return T if the names were added."
         (when (stringp text)
           (write-string text stream))))))
 
+(-> record--cache-notice (string (or null integer)) (or null notice-entry))
+(defun record--cache-notice (text time)
+  "Return a cache notice for TEXT, or NIL if the wording is not recognized."
+  (let ((prefix (find-if (lambda (prefix) (uiop:string-prefix-p prefix text))
+                         '("cache miss " "cache stalled · "))))
+    (when prefix
+      (let ((clauses (loop with separator = " · "
+                           for start = (length prefix) then (+ end (length separator))
+                           for end = (search separator text :start2 start)
+                           collect (subseq text start end)
+                           while end)))
+        (make-instance 'notice-entry
+                       :time time
+                       :tone ':warning
+                       :text (if (string= prefix "cache miss ") "prompt cache miss" "prompt cache stalled")
+                       :body (format nil "~{~A~^~%~}" clauses))))))
+
+(-> record--side-status (list) (or null notice-entry))
+(defun record--side-status (record)
+  "Return the diagnostic described by the stored display spans of RECORD."
+  (let* ((fields (rest record))
+         (text   (string-trim '(#\Space #\Tab #\Newline) (record--side-status-text record)))
+         (time   (record--time record))
+         (style  (let ((span (first (getf fields :spans))))
+                   (and (consp span) (first span))))
+         (words  (if (and (> (length text) 2)
+                          (char= (char text 1) #\Space)
+                          (find (char text 0) "!·∙✓■"))
+                     (subseq text 2)
+                     text))
+         (break  (position #\Newline words)))
+    (when (plusp (length words))
+      (or (and (equal (getf fields :source) "prompt-cache") (record--cache-notice words time))
+          (make-instance 'notice-entry
+                         :time time
+                         :tone (case style
+                                 (:failure
+                                  ':failure)
+                                 (:success
+                                  ':success)
+                                 (otherwise
+                                  ':quiet))
+                         :text (string-right-trim '(#\Space #\Tab) (subseq words 0 break))
+                         :body (and break (string-trim '(#\Space #\Tab #\Newline) (subseq words (1+ break)))))))))
+
 (-> record->entry (projector list) (or null entry))
 (defun record->entry (projector record)
   "Return the transcript entry for RECORD, or NIL if RECORD has no entry.
@@ -396,9 +441,7 @@ of the call in the transcript of PROJECTOR."
      (apply #'projector--settle-tool projector (getf (rest record) :call-id) (record--result (rest record)))
      nil)
     (:side-status
-     (make-instance 'output-entry
-                    :time (record--time record)
-                    :text (string-right-trim '(#\Newline #\Space) (record--side-status-text record))))
+     (record--side-status record))
     (:assistant-yield
      (let ((count (getf (rest record) :job-count)))
        (when (and (integerp count) (plusp count))
@@ -575,7 +618,8 @@ Do nothing if the last entry is already that marker."
      nil))
   nil)
 
-(defparameter *notice-glyphs* '((#\∙ . :quiet) (#\! . :failure) (#\@ . :quiet) (#\◆ . :quiet) (#\↪ . :quiet))
+(defparameter *notice-glyphs* '((#\∙ . :quiet) (#\· . :quiet) (#\✓ . :success)
+                                (#\! . :failure) (#\@ . :quiet) (#\◆ . :quiet) (#\↪ . :quiet))
   "A list of the glyphs at the start of one-line notices from Autolith, associated with their tones.")
 
 (-> projector--notice-line (string) (values (or null string) (or null keyword)))
@@ -656,13 +700,20 @@ before the output. That line becomes the invocation of the entry."
            (echo-p  (and (> (length trimmed) 2)
                          (string= "* " trimmed :end2 2)
                          (null (position #\Newline trimmed))))
-           (open    (projector--output projector)))
+           (open    (projector--output projector))
+           (cache   (and (or (null open) (null (output-entry-invocation open)))
+                         (null (projector-invocation projector))
+                         (uiop:string-prefix-p "! cache " trimmed)
+                         (record--cache-notice (subseq trimmed 2) nil))))
       (cond
         ((zerop (length (string-trim '(#\Newline #\Space) trimmed)))
          nil)
         ;; A reasoning summary printed by the terminal is shown once, as a thought.
         ((projector--reasoning-summary trimmed)
          (projector--note-reasoning projector (projector--reasoning-summary trimmed)))
+        (cache
+         (projector--close-stream projector)
+         (projector--append projector cache))
         ;; The NIL returned by a command is dropped after the output of the command.
         ((and open
               (plusp (length (output-entry-text open)))
@@ -676,6 +727,7 @@ before the output. That line becomes the invocation of the entry."
         ;; A notice line becomes a notice entry, unless a command run by the
         ;; person is printing. In that case, the line is part of the output.
         ((and (or (null open) (null (output-entry-invocation open)))
+              (null (projector-invocation projector))
               (projector--notice-line trimmed))
          (multiple-value-bind (words tone) (projector--notice-line trimmed)
            (projector--close-stream projector)

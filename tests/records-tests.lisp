@@ -232,6 +232,54 @@ The sequence number of the record is SEQUENCE, and the wire JSON is WIRE-JSON."
        (fiveam:is (equal '(output-entry notice-entry) (mapcar #'type-of entries)))
        (fiveam:is (search "cache stalled" (notice-entry-text (second entries)))))))
 
+(fiveam:test side-status-diagnostics-match-live-and-history
+  (let ((records (list
+                  '(:side-status :seq 1 :time 4000000000 :source "prompt-cache"
+                    :spans ((:failure . "! ") (:notice . "cache miss ")
+                            (:code . "259.8K") (:dim . " cached tokens lost · ")
+                            (:code . "0") (:dim . " / ") (:code . "278.7K")
+                            (:dim . " input tokens cached") (:dim . "") (:dim . " · request prefix intact")))
+                  '(:side-status :seq 2 :time 4000000001 :source "prompt-cache"
+                    :spans ((:failure . "! ") (:notice . "cache stalled · ")
+                            (:code . "153.0K") (:dim . " / ") (:code . "191.2K")
+                            (:dim . " input tokens cached") (:dim . " · shared history grew 319.3K characters")
+                            (:dim . " · request cache markers moved")))
+                  (list :side-status :seq 3 :time 4000000002 :source "mission failed"
+                        :spans (list (cons ':failure "■ mission failed")
+                                     (cons ':dim (format nil "~%  No worker reported success."))))
+                  '(:side-status :seq 4 :time 4000000003 :source "prompt-cache"
+                    :spans ((:notice . "· Cache metrics are not available."))))))
+    (with-test-projector (transcript projector)
+      (let ((history (records->entries projector records)))
+        (dolist (record records)
+          (projector-apply projector (list :record :record record)))
+        (fiveam:is (= 4 (transcript-length transcript)))
+        (loop for saved in history for live across (transcript-entries transcript)
+              do (fiveam:is (string= (notice-entry-text saved) (notice-entry-text live)))
+                 (fiveam:is (equal (notice-entry-body saved) (notice-entry-body live)))
+                 (fiveam:is (eql (notice-entry-tone saved) (notice-entry-tone live)))
+                 (fiveam:is (= (entry-time saved) (entry-time live))))
+        (destructuring-bind (miss stalled mission fallback) history
+          (fiveam:is (eq :warning (notice-entry-tone miss)))
+          (fiveam:is (search "259.8K cached tokens lost" (notice-entry-body miss)))
+          (fiveam:is (search "0 / 278.7K input tokens cached" (notice-entry-body miss)))
+          (fiveam:is (search "request prefix intact" (notice-entry-body miss)))
+          (fiveam:is (search "shared history grew 319.3K characters" (notice-entry-body stalled)))
+          (fiveam:is (search "request cache markers moved" (notice-entry-body stalled)))
+          (fiveam:is (eq :failure (notice-entry-tone mission)))
+          (fiveam:is (string= "No worker reported success." (notice-entry-body mission)))
+          (fiveam:is (search "metrics are not available" (notice-entry-text fallback))))
+        (setf (projector-boundary projector) 4)
+        (projector-apply projector (list :record :record (first records)))
+        (fiveam:is (= 4 (transcript-length transcript)))))))
+
+(fiveam:test output-that-begins-like-a-notice-keeps-its-command
+  (with-test-projector (transcript projector)
+    (setf (projector-invocation projector) "/cache")
+    (projector-apply projector '(:present :text "! cache stalled · example output"))
+    (let ((entry (transcript-entry transcript 0)))
+      (fiveam:is (string= "/cache" (output-entry-invocation entry)))
+      (fiveam:is (search "example output" (output-entry-text entry))))))
 (fiveam:test a-wrapped-reasoning-summary-is-unwrapped
   (fiveam:is (string= (format nil "Planning the deadline capture~2%Checking Lisp apropos")
                       (projector--reasoning-summary

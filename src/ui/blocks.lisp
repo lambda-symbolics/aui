@@ -402,7 +402,13 @@
     :initarg       :title
     :reader        row-block-title
     :type          list
-    :documentation "The spans of the single line of the row.")
+    :documentation "The text spans of the row.")
+   (paragraph
+    :initarg       :paragraph
+    :initform      nil
+    :reader        row-block-paragraph
+    :type          (or null paragraph)
+    :documentation "The selectable, wrapping title of the row, or NIL for a single line.")
    (trailing
     :initarg       :trailing
     :initform      nil
@@ -420,31 +426,52 @@
     :reader        row-block-style
     :type          text-style
     :documentation "The style of the title for spans without a style."))
-  (:documentation "A single line that summarizes something and responds to clicks, such as a tool call."))
+  (:documentation "A row that summarizes something and can respond to clicks."))
 
 (defparameter *row-mark-size* 14
   "The side length of the mark at the start of a row.")
 
+(-> row-block--title-offset (row-block) integer)
+(defun row-block--title-offset (block)
+  "Return the space to the left of the title of BLOCK."
+  (+ 6 (if (row-block-mark block) (+ *row-mark-size* 8) 0)))
+
+(-> row-block--trailing-width (row-block) integer)
+(defun row-block--trailing-width (block)
+  "Return the space reserved for the right-aligned label of BLOCK."
+  (let ((label (row-block-trailing block)))
+    (if label (+ (text-width label (text-style ':meta)) 10) 0)))
+
 (defmethod block-layout ((block row-block) width)
-  "Return the height of one line in the style of the row."
-  (declare (ignore width))
-  (+ 4 (text-style-line-height (row-block-style block))))
+  "Return the height of the title, with wrapping when the row has a paragraph."
+  (let ((paragraph (row-block-paragraph block)))
+    (+ 4 (if paragraph
+             (paragraph-layout paragraph (max 1 (- width (row-block--title-offset block) (row-block--trailing-width block) 6)))
+             (text-style-line-height (row-block-style block))))))
+
+(defmethod block-leaves ((block row-block))
+  "Return the selectable title of a wrapping row."
+  (let ((paragraph (row-block-paragraph block)))
+    (when paragraph
+      (list (list paragraph (row-block--title-offset block) 2)))))
 
 (defmethod block-paint ((block row-block) x y)
-  "Draw the mark, the title and the trailing text. The title is cut to fit. The row is inverted if the pointer is over it."
-  (let* ((stage    *paint-stage*)
-         (style    (row-block-style block))
-         (meta     (text-style ':meta))
-         (width    (block-width block))
-         (height   (block-height block))
-         (action   (row-block-action block))
-         (hot-p    (and stage action (stage-hot-p stage (row-block-identifier block))))
-         (trailing (row-block-trailing block))
-         (trail-w  (if trailing (+ (text-width trailing meta) 10) 0))
-         (text-x   (+ x 6 (if (row-block-mark block) (+ *row-mark-size* 8) 0))))
+  "Draw the mark, the title and the trailing text. Invert the row when the pointer is over its action."
+  (let* ((stage     *paint-stage*)
+         (style     (row-block-style block))
+         (meta      (text-style ':meta))
+         (width     (block-width block))
+         (height    (block-height block))
+         (action    (row-block-action block))
+         (hot-p     (and stage action (stage-hot-p stage (row-block-identifier block))))
+         (trailing  (row-block-trailing block))
+         (trail-w   (row-block--trailing-width block))
+         (text-x    (+ x (row-block--title-offset block)))
+         (line-h    (+ 4 (text-style-line-height style)))
+         (paragraph (row-block-paragraph block)))
     (flet ((content ()
              (let ((mark   (row-block-mark block))
-                   (mark-y (+ y (floor (- height *row-mark-size*) 2))))
+                   (mark-y (+ y (floor (- line-h *row-mark-size*) 2))))
                (cond
                  ((eq mark ':spinner)
                   (setf (stage-animating-p stage) t)
@@ -453,20 +480,22 @@
                   (paint-mark mark (+ x 6) mark-y
                               :size  *row-mark-size*
                               :color (and (not hot-p) (row-block-mark-color block))))))
-             (let ((cursor   text-x)
-                   (limit    (- (+ x width) trail-w 6))
-                   (baseline (+ y 2 (text-baseline style))))
-               (dolist (span (row-block-title block))
-                 (let* ((span-style (or (span-style span) style))
-                        (fitted     (text-fit (span-text span) span-style (max 0 (- limit cursor)))))
-                   (when (and (plusp (- limit cursor)) (plusp (length fitted)))
-                     (setf cursor (paint-text fitted cursor baseline :style span-style))))))
+             (if paragraph
+               (block--paint-paragraph paragraph text-x (+ y 2))
+               (let ((cursor   text-x)
+                     (limit    (- (+ x width) trail-w 6))
+                     (baseline (+ y 2 (text-baseline style))))
+                 (dolist (span (row-block-title block))
+                   (let* ((span-style (or (span-style span) style))
+                          (fitted     (text-fit (span-text span) span-style (max 0 (- limit cursor)))))
+                     (when (and (plusp (- limit cursor)) (plusp (length fitted)))
+                       (setf cursor (paint-text fitted cursor baseline :style span-style)))))))
              (when trailing
                (paint-text-in trailing meta
                               :x      (- (+ x width) trail-w 6)
                               :y      y
                               :width  trail-w
-                              :height height
+                              :height line-h
                               :align  ':right))))
       (if hot-p
           (with-inversion (x y width height)

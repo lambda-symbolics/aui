@@ -624,11 +624,6 @@ The arguments and the result are shown in the opened row. A plan update is drawn
 
 ;;;; -- Notices, Output and Markers --
 
-(-> entries--detail-sections (string) (values list (or null string)))
-(defun entries--detail-sections (detail)
-  "Return DETAIL as one raw section for legacy notices."
-  (values (list (cons "detail" detail)) nil))
-
 (-> entries--last-line (string) string)
 (defun entries--last-line (text)
   "Return the last nonblank line of TEXT."
@@ -639,12 +634,12 @@ The arguments and the result are shown in the opened row. A plan update is drawn
       ""))
 
 (defmethod entry-blocks ((entry notice-entry) toggle)
-  "Draw a notice as a quiet row in the voice of the window.
-
-If the notice has detail, the last line of the detail is shown in the closed row. The row opens on a click."
+  "Draw the statement and any supporting text. Open longer detail on a click."
   (let* ((tone       (notice-entry-tone entry))
+         (body       (notice-entry-body entry))
          (detail     (notice-entry-detail entry))
          (expanded-p (and detail (entry-expanded-p entry)))
+         (style      (text-style ':label))
          (color      (ecase tone
                        (:quiet
                         nil)
@@ -653,77 +648,72 @@ If the notice has detail, the last line of the detail is shown in the closed row
                        (:warning
                         *amber*)
                        (:failure
-                        *red*))))
-    (multiple-value-bind (sections status) (if detail (entries--detail-sections detail) (values nil nil))
-      (let* ((preview (and detail
-                           (not expanded-p)
-                           (format nil "~@[~A  ~]~A" status
-                                   (entries--one-line
-                                    (entries--last-line (or (rest (first (last sections))) ""))))))
-             (row     (make-instance 'row-block
-                                     :identifier (list ':entry (entry-identifier entry))
-                                     :mark       (cond
-                                                   (expanded-p
-                                                    ':open)
-                                                   (detail
-                                                    ':closed)
-                                                   (t
-                                                    (ecase tone
-                                                      (:quiet
-                                                       ':point)
-                                                      (:success
-                                                       ':check)
-                                                      ((:warning :failure)
-                                                       ':cross))))
-                                     :mark-color color
-                                     :title      (spans (list (notice-entry-text entry)
-                                                              (text-style ':label :color color))
-                                                        (and preview
-                                                             (list (format nil "  ~A" preview)
-                                                                   (text-style ':label :face ':mono-italic))))
-                                     :trailing   (and (entry-time entry) (entries--clock (entry-time entry)))
-                                     :style      (text-style ':label)
-                                     ;; A notice with detail opens. A notice about
-                                     ;; another channel leads to that channel.
-                                     :action     (cond
-                                                   (detail
-                                                    toggle)
-                                                   ((and (notice-entry-channel entry) *entry-channel-opener*)
-                                                    (let ((opener  *entry-channel-opener*)
-                                                          (channel (notice-entry-channel entry)))
-                                                      (lambda () (funcall opener channel)))))
-                                     :margin-top 4)))
-        (if expanded-p
-            (list row
-                  (make-instance 'box-block
-                                 :children      (loop for (label . text) in sections
-                                                      for first-p = t then nil
-                                                      collect (make-code-block
-                                                               (entries--preview text)
-                                                               :label         (if (and first-p status)
-                                                                                  (format nil "~A · ~A" label status)
-                                                                                  label)
-                                                               :margin-bottom 4))
-                                 :frame-p       nil
-                                 :padding-x     28
-                                 :padding-y     2
-                                 :margin-bottom 8))
-            (list row))))))
+                        *red*)))
+         (row        (make-instance 'row-block
+                                    :identifier (list ':entry (entry-identifier entry))
+                                    :mark       (cond
+                                                  (expanded-p
+                                                   ':open)
+                                                  (detail
+                                                   ':closed)
+                                                  (t
+                                                   (ecase tone
+                                                     (:quiet
+                                                      ':point)
+                                                     (:success
+                                                      ':check)
+                                                     (:warning
+                                                      ':ring)
+                                                     (:failure
+                                                      ':cross))))
+                                    :mark-color color
+                                    :title      nil
+                                    :paragraph  (make-paragraph
+                                                 (spans (list (text-clean (notice-entry-text entry))
+                                                              (text-style ':label-bold :color color)))
+                                                 :style style)
+                                    :trailing   (and (entry-time entry) (entries--clock (entry-time entry)))
+                                    :style      style
+                                    :action     (cond
+                                                  (detail
+                                                   toggle)
+                                                  ((and (notice-entry-channel entry) *entry-channel-opener*)
+                                                   (let ((opener  *entry-channel-opener*)
+                                                         (channel (notice-entry-channel entry)))
+                                                     (lambda () (funcall opener channel)))))
+                                    :margin-top 4))
+         (preview    (or body (and detail (not expanded-p) (entries--last-line detail)))))
+    (append (list row)
+            (when preview
+              (let ((style (text-style ':small)))
+                (list (make-text-block (spans (text-clean preview))
+                                       :style style :indent 28 :margin-bottom 6))))
+            (when expanded-p
+              (list (make-instance 'box-block
+                                   :children      (list (make-code-block (entries--preview detail :lines *output-open-lines*)
+                                                                        :label "details" :margin-bottom 4))
+                                   :frame-p       nil
+                                   :padding-x     28
+                                   :padding-y     2
+                                   :margin-bottom 8))))))
 
 (defmethod entry-blocks ((entry schemas-entry) toggle)
-  "Draw a quiet row that lists the groups of tools looked up by the agent."
+  "Draw a quiet, wrapping list of the groups of tools looked up by the agent."
   (declare (ignore toggle))
-  (list (make-instance 'row-block
-                       :identifier (list ':entry (entry-identifier entry))
-                       :mark       ':point
-                       :title      (cons (make-span "tool schemas  " (text-style ':label))
-                                         (loop for name in (schemas-entry-names entry)
-                                               for first-p = t then nil
-                                               unless first-p
-                                                 collect (make-span ", " (text-style ':label))
-                                               collect (make-span name (text-style ':label :color *blue*))))
-                       :style      (text-style ':label)
-                       :margin-top 4)))
+  (let* ((style      (text-style ':label))
+         (name-style (text-style ':label :color *blue*))
+         (title      (cons (make-span "tool schemas  " style)
+                           (loop for name in (schemas-entry-names entry)
+                                 for first-p = t then nil
+                                 unless first-p collect (make-span ", " style)
+                                 collect (make-span name name-style)))))
+    (list (make-instance 'row-block
+                         :identifier (list ':entry (entry-identifier entry))
+                         :mark       ':point
+                         :title      nil
+                         :paragraph  (make-paragraph title :style style)
+                         :style      style
+                         :margin-top 4))))
 
 (defmethod entry-blocks ((entry output-entry) toggle)
   "Draw the output of a command in the typewriter face, under the form that printed it."

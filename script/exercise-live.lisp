@@ -220,7 +220,10 @@ The answer is streamed slowly if the message contains the word slowly."
          "object"  "chat.completion.chunk"
          "model"   "mock-1"
          "choices" (vector)
-         "usage"   (autolith::json-object "prompt_tokens" 1200 "completion_tokens" 180 "total_tokens" 1380))))
+          "usage"   (autolith::json-object
+                     "prompt_tokens" 1200 "completion_tokens" 180 "total_tokens" 1380
+                     "prompt_tokens_details"
+                     (autolith::json-object "cached_tokens" (if (search "slowly" last-user) 1024 0))))))
       (mock--send-event stream "[DONE]")
       (mock--send stream (format nil "0~C~C~C~C" #\Return #\Newline #\Return #\Newline))))
   nil)
@@ -322,7 +325,8 @@ not be changed by the exercise."
     (ensure-directories-exist init)
     (with-open-file (stream init :direction ':output :if-exists ':supersede)
       (format stream "(register-openai-compatible-provider~% :name        \"mock\"~% :description \"The live exercise's model\"~% :endpoint    \"http://127.0.0.1:~D/v1/chat/completions\"~% :models      '(\"mock-1\"))~%"
-              port))
+              port)
+      (write-line "(setf (config :cache-miss-notices-p) t)" stream))
     (ensure-directories-exist keys)
     (autolith::api-key-credential-manager-save-key
      (autolith::api-key-credential-manager-create :provider-name "mock" :pathname keys)
@@ -490,6 +494,12 @@ not be changed by the exercise."
                                                       (exercise-live--idle-p workbench))
                                                     :seconds 120))
              (main--settle workbench 1)
+             (exercise-expect "the provider cache miss arrives as a warning with the lost reads in its body"
+                              (some (lambda (notice)
+                                      (and (eq (notice-entry-tone notice) ':warning)
+                                           (search "cached tokens lost" (or (notice-entry-body notice) ""))))
+                                    (exercise-live--entries workbench 'notice-entry)))
+             (exercise-live--picture workbench "live-cache-miss")
              (let ((tool (first (exercise-live--entries workbench 'tool-entry))))
                (exercise-expect "the tool call contains the output of the command"
                                 (and tool
