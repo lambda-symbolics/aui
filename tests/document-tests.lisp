@@ -146,3 +146,13 @@ The estimated height of an entry is equal to the real height."
     (setf (tool-entry-status entry) ':failed (getf (tool-entry-details entry) :exit-code) 2)
     (let ((failure (second (box-block-children (entries--tool-detail entry)))))
       (fiveam:is (search "2" (paragraph-text (text-block-paragraph failure)))))))
+
+(fiveam:test a-protected-folder-refusal-is-distinguished-from-other-tool-failures
+  (let* ((report "resource.read failed: Path /example/private/notes.txt is denied by the folder blacklist.")
+         (entry  (make-instance 'tool-entry :name "resource.read" :status ':failed :output report))
+         (row    (first (entry-blocks entry (constantly nil)))))
+    (fiveam:is (find "Blocked by folder policy" (row-block-title row) :key #'span-text :test #'equal))
+    (setf (tool-entry-output entry) "resource.read failed: Permission denied.")
+    (fiveam:is (not (entries--protected-path-refusal-p entry)))
+    (setf (tool-entry-output entry) report (tool-entry-status entry) ':completed)
+    (fiveam:is (not (entries--protected-path-refusal-p entry)))))

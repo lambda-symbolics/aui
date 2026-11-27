@@ -571,6 +571,16 @@ Commands are highlighted as shell, Lisp is highlighted as Lisp, and the rest is 
                                             (text-style ':label)))))
         (list (make-span preview (text-style ':label))))))
 
+(-> entries--protected-path-refusal-p (tool-entry) boolean)
+(defun entries--protected-path-refusal-p (entry)
+  "Recognize the folder-policy refusal in a retained failure report."
+  (let ((output (tool-entry-output entry)))
+    (and (eq (tool-entry-status entry) ':failed) output
+         (let* ((line   (subseq output 0 (position #\Newline output)))
+                (prefix (format nil "~A failed: Path " (tool-entry-name entry))))
+           (and (or (uiop:string-prefix-p prefix line) (uiop:string-prefix-p "Path " line))
+                (uiop:string-suffix-p line " is denied by the folder blacklist."))))))
+
 (defmethod entry-blocks ((entry tool-entry) toggle)
   "Draw a tool call as one row that contains the name of the tool and the preview.
 
@@ -594,10 +604,13 @@ The arguments and the result are shown in the opened row. A plan update is drawn
                           :title      (cons (make-span (format nil "~A  " (tool-entry-name entry))
                                                        (text-style ':label-bold
                                                                    :color (if (eq status ':failed) *red* *amber*)))
-                                            (if (and expanded-p (equal (tool-entry-name entry) "shell.run")
-                                                     (stringp (entries--argument entry "command")))
-                                                nil
-                                                (entries--preview-spans entry)))
+                                            (cond ((entries--protected-path-refusal-p entry)
+                                                   (list (make-span "Blocked by folder policy" (text-style ':label :color *red*))))
+                                                  ((and expanded-p (equal (tool-entry-name entry) "shell.run")
+                                                        (stringp (entries--argument entry "command")))
+                                                   nil)
+                                                  (t
+                                                   (entries--preview-spans entry))))
                           :trailing   (and seconds (entries--duration seconds))
                           :style      (text-style ':label)
                           :action     toggle)))
