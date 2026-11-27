@@ -76,6 +76,11 @@
   "Return the version of the Autolith used to build this client."
   autolith::*autolith-version*)
 
+(-> world-user-init-file (world) string)
+(defun world-user-init-file (world)
+  "Return the trusted user initialization file for WORLD without reading it."
+  (namestring (autolith::configuration-user-init-path (world-configuration world))))
+
 
 ;;;; -- Channel Tree --
 

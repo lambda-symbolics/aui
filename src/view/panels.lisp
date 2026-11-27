@@ -208,6 +208,22 @@ of a thing. Empty tabs contain a short note."
 
 ;;;; -- Output --
 
+(-> panel-show-protected-folders (workbench) null)
+(defun panel-show-protected-folders (workbench)
+  "Explain how to configure Autolith's best-effort folder denylist."
+  (workbench-show-panel
+   workbench "Protected folders"
+   (list (panel--line "Autolith 0.69.3 and later can refuse paths passed directly to native tools, including in Full access mode."
+                     :style (text-style ':small))
+         (panel--line "This is best-effort protection, not an OS sandbox. It does not confine arbitrary shell commands, Lisp forms, indexed search, or external MCP servers."
+                     :style (text-style ':small))
+         (panel--line "To change the list, edit your trusted init file and restart the world server. Use absolute folder paths or paths starting with ~/."
+                     :style (text-style ':small))
+         (make-code-block (world-user-init-file (workbench-world workbench)) :label "User init file" :margin-bottom 8)
+         (let ((example "(pushnew \"~/Private/\" autolith::*tool-path-blacklist* :test #'equal)"))
+           (make-code-block example :spans (code-spans example "lisp") :label "Example"))))
+  nil)
+
 (-> panel-show-output (workbench string string) null)
 (defun panel-show-output (workbench title operation)
   "Show the report of the operation OPERATION of the channel in a panel titled TITLE."

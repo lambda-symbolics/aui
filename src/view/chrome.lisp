@@ -140,6 +140,8 @@
               (make-choice)
               (item "Status"
                     (lambda () (panel-show-output workbench "Status" "status")))
+              (item "Protected folders"
+                    (lambda () (panel-show-protected-folders workbench)))
               (item "Plan"
                     (lambda () (panel-show-plan workbench)))
               (item "Agenda"
